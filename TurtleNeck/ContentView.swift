@@ -74,7 +74,7 @@ struct ContentView: View {
             DisclosureGroup("상세 보기", isExpanded: $showDetails) {
                 VStack(spacing: 6) {
                     SignalBar(label: "숙임", value: bridge.cAngle)
-                    SignalBar(label: "목빼기", value: bridge.cZ)
+                    SignalBar(label: "얼굴크기", value: bridge.cZ)
                     SignalBar(label: "머리높이", value: bridge.cHeight)
                     HStack {
                         Text("오버레이").font(.caption2).foregroundStyle(.secondary)
