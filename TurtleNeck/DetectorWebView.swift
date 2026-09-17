@@ -34,55 +34,62 @@ struct DetectorWebView: NSViewRepresentable {
       <canvas id="c"></canvas>
     </div>
     <script type="module">
-    import { FilesetResolver, PoseLandmarker }
+    import { FilesetResolver, PoseLandmarker, FaceLandmarker }
       from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
     function send(o){ window.webkit.messageHandlers.pose.postMessage(o); }
 
-    let landmarker, baseline = null;
-    const WIN = 5;
-    const WIN_Z = 12;        // z축은 더 길게 평균 (노이즈 큼)
-    let bufDrop = [], bufZ = [], bufHeight = [];
-    let curDrop = null, curZ = null, curHeight = null;
+    let poseLM, faceLM, baseline = null;
+    let frame = 0;
+    let lastShoulderW = null, lastShoulderY = null;
+    let lastFace = null;   // {cx, cy, size, pitch, pts}
 
-    // 가중치 · 데드존 (조정 손잡이)
-    const W_DROP = 900.0;    // 숙임(코가 귀보다 내려간 정도)
-    const W_Z = 100.0;       // 목빼기(귀가 어깨보다 앞)
-    const W_HEIGHT = 60.0;   // 머리높이 보조
-    const DEADZONE = 6;
-    const DROP_DEAD = 0.012; // 숙임 정자세 튐 차단
-    const Z_DEAD = 0.010;    // 목빼기 정자세 튐 차단
+    const WIN = 5;
+    let bufPitch = [], bufHeadDrop = [], bufSizeRatio = [];
+    let curPitch = null, curHeadDrop = null, curSizeRatio = null;
 
     function pushAvg(buf, v){
       buf.push(v);
       if(buf.length > WIN) buf.shift();
       return buf.reduce((a,b)=>a+b, 0) / buf.length;
     }
-    function pushAvgN(buf, v, n){
-      buf.push(v);
-      if(buf.length > n) buf.shift();
-      return buf.reduce((a,b)=>a+b, 0) / buf.length;
-    }
 
     window.calibrate = () => {
-      if(curDrop!==null){ baseline={drop:curDrop, z:curZ, height:curHeight};
-        send({status:"기준 저장 완료 — 이제 자세를 무너뜨려 보세요"}); }
-      else { send({status:"먼저 자세가 잡혀야 합니다"}); }
+      if(curPitch!==null){ baseline={pitch:curPitch, headDrop:curHeadDrop, sizeRatio:curSizeRatio};
+        send({status:"기준 저장 완료 — 자세를 바꿔가며 원본값 변화를 관찰하세요"}); }
+      else { send({status:"먼저 어깨·얼굴이 모두 잡혀야 합니다"}); }
     };
 
-    // 코·귀·어깨 초록 점 그리기
-    function draw(pts){
+    function pitchFromMatrix(m){
+      // MediaPipe 변환행렬(4x4, 열 우선)에서 회전 3x3 추출
+      const r00=m[0], r01=m[4], r02=m[8];
+      const r10=m[1], r11=m[5], r12=m[9];
+      const r20=m[2], r21=m[6], r22=m[10];
+      // pitch = 고개 상하 각도 (X축 회전)
+      const pitch = Math.atan2(-r12, Math.sqrt(r02*r02 + r22*r22)) * 180/Math.PI;
+      return pitch;
+    }
+
+    function draw(){
       const v = document.getElementById("v");
       const c = document.getElementById("c");
       c.width = v.videoWidth; c.height = v.videoHeight;
       const ctx = c.getContext("2d");
       ctx.clearRect(0,0,c.width,c.height);
-      ctx.fillStyle = "#22ff55";
-      ctx.strokeStyle = "#22ff55";
-      ctx.font = "bold 20px sans-serif";
-      for(const p of pts){
-        const x = p.x * c.width, y = p.y * c.height;
-        ctx.beginPath(); ctx.arc(x, y, 8, 0, Math.PI*2); ctx.fill();
-        ctx.fillText(p.name, x + 12, y - 10);
+      // 얼굴 지점 코·눈·귀 (파랑)
+      if(lastFace && lastFace.pts){
+        ctx.fillStyle = "#3399ff";
+        ctx.font = "bold 16px sans-serif";
+        for(const p of lastFace.pts){
+          ctx.beginPath(); ctx.arc(p.x*c.width, p.y*c.height, 6, 0, Math.PI*2); ctx.fill();
+          ctx.fillText(p.name, p.x*c.width + 8, p.y*c.height - 8);
+        }
+      }
+      // 어깨 (초록)
+      if(window._shL && window._shR){
+        ctx.fillStyle = "#22ff55";
+        for(const p of [window._shL, window._shR]){
+          ctx.beginPath(); ctx.arc(p.x*c.width, p.y*c.height, 8, 0, Math.PI*2); ctx.fill();
+        }
       }
     }
 
@@ -90,10 +97,15 @@ struct DetectorWebView: NSViewRepresentable {
       try{
         const vision = await FilesetResolver.forVisionTasks(
           "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
-        landmarker = await PoseLandmarker.createFromOptions(vision, {
+        poseLM = await PoseLandmarker.createFromOptions(vision, {
           baseOptions:{ modelAssetPath:
             "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task" },
           runningMode:"VIDEO", numPoses:1 });
+        faceLM = await FaceLandmarker.createFromOptions(vision, {
+          baseOptions:{ modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task" },
+          runningMode:"VIDEO", numFaces:1,
+          outputFacialTransformationMatrixes:true });
         send({status:"카메라 요청 중…"});
         const stream = await navigator.mediaDevices.getUserMedia({video:true});
         const v = document.getElementById("v"); v.srcObject = stream; await v.play();
@@ -104,58 +116,73 @@ struct DetectorWebView: NSViewRepresentable {
 
     function loop(){
       const v = document.getElementById("v");
-      if(landmarker && v.readyState>=2){
-        const res = landmarker.detectForVideo(v, performance.now());
-        if(res.landmarks && res.landmarks.length){
-          const lm = res.landmarks[0];
-          const nose = lm[0];
-          const earL = lm[7], earR = lm[8], shL = lm[11], shR = lm[12];
-          const ear = {x:(earL.x+earR.x)/2, y:(earL.y+earR.y)/2, z:(earL.z+earR.z)/2};
-          const shoulder = {x:(shL.x+shR.x)/2, y:(shL.y+shR.y)/2, z:(shL.z+shR.z)/2};
-
-          // 초록 점 그리기 (코 + 양쪽 귀 + 양쪽 어깨)
-          draw([
-            {x:nose.x, y:nose.y, name:"코"},
-            {x:earL.x, y:earL.y, name:"귀"},
-            {x:earR.x, y:earR.y, name:"귀"},
-            {x:shL.x, y:shL.y, name:"어깨"},
-            {x:shR.x, y:shR.y, name:"어깨"}
-          ]);
-
-          // 숙임: 코가 귀보다 아래로 내려간 정도
-          const rawDrop = nose.y - ear.y;
-          // 목빼기: 귀가 어깨보다 앞
-          const rawZ = shoulder.z - ear.z;
-          // 머리높이 보조
-          const rawHeight = shoulder.y - ear.y;
-
-          const drop = pushAvg(bufDrop, rawDrop);
-          const z = pushAvgN(bufZ, rawZ, WIN_Z);
-          const height = pushAvg(bufHeight, rawHeight);
-          curDrop = drop; curZ = z; curHeight = height;
-
-          let sc=0, st="기준 미설정 — ‘기준 잡기’를 누르세요", cA=0, cZv=0, cH=0;
-          if(baseline!==null){
-            // 숙임
-            const dropDiff = Math.max(0, (drop - baseline.drop) - DROP_DEAD);
-            cA = dropDiff * W_DROP;
-            // 목빼기 (낮은 구간 민감 + 세기 1.3)
-            const zDiff = Math.max(0, (z - baseline.z) - Z_DEAD);
-            cZv = Math.sqrt(zDiff) * W_Z * 1.3;
-            // 머리높이 보조
-            cH = Math.max(0, baseline.height - height) * W_HEIGHT;
-
-            // 지배 신호만 강조 (약한 쪽 60%로)
-            if (cA > cZv) { cZv *= 0.6; } else { cA *= 0.6; }
-
-            const total = cA + cZv + cH;
-            sc = total < DEADZONE ? 0 : total - DEADZONE;
-            if(sc<5) st="정자세"; else if(sc<12) st="경증 거북목";
-            else if(sc<22) st="중등도 거북목"; else st="중증 거북목";
+      if(poseLM && faceLM && v.readyState>=2){
+        const t = performance.now();
+        frame++;
+        if(frame % 2 === 1){
+          const r = poseLM.detectForVideo(v, t);
+          if(r.landmarks && r.landmarks.length){
+            const lm = r.landmarks[0];
+            const shL = lm[11], shR = lm[12];
+            window._shL = shL; window._shR = shR;
+            lastShoulderW = Math.hypot(shL.x - shR.x, shL.y - shR.y);
+            lastShoulderY = (shL.y + shR.y) / 2;
           }
-          send({detected:true, score:sc, status:st, cAngle:cA, cZ:cZv, cHeight:cH});
         } else {
-          send({detected:false, status:"사람이 감지되지 않음"});
+          const r = faceLM.detectForVideo(v, t);
+          if(r.faceLandmarks && r.faceLandmarks.length){
+            const lm = r.faceLandmarks[0];
+            let minX=1,minY=1,maxX=0,maxY=0;
+            for(const p of lm){
+              if(p.x<minX)minX=p.x; if(p.x>maxX)maxX=p.x;
+              if(p.y<minY)minY=p.y; if(p.y>maxY)maxY=p.y;
+            }
+            const mat = r.facialTransformationMatrixes
+                        && r.facialTransformationMatrixes.length
+                        ? r.facialTransformationMatrixes[0].data : null;
+            // 코1, 왼눈33, 오눈263, 왼귀234, 오귀454
+            lastFace = {
+              cx:(minX+maxX)/2, cy:(minY+maxY)/2, size:(maxY-minY),
+              pitch: mat ? pitchFromMatrix(mat) : 0,
+              pts:[
+                {x:lm[1].x, y:lm[1].y, name:"코"},
+                {x:lm[33].x, y:lm[33].y, name:"눈"},
+                {x:lm[263].x, y:lm[263].y, name:"눈"},
+                {x:lm[234].x, y:lm[234].y, name:"귀"},
+                {x:lm[454].x, y:lm[454].y, name:"귀"},
+                {x:lm[13].x, y:lm[13].y, name:"입"},
+                {x:lm[152].x, y:lm[152].y, name:"턱"}
+              ]
+            };
+          }
+        }
+        draw();
+
+        if(lastFace!==null && lastShoulderW!==null && lastShoulderY!==null){
+          const headDrop = lastFace.cy - lastShoulderY;
+          const sizeRatio = lastFace.size / lastShoulderW;
+          const p = pushAvg(bufPitch, lastFace.pitch);
+          const hd = pushAvg(bufHeadDrop, headDrop);
+          const sr = pushAvg(bufSizeRatio, sizeRatio);
+          curPitch = p; curHeadDrop = hd; curSizeRatio = sr;
+
+          let st = "기준 미설정 — ‘기준 잡기’를 누르세요";
+          let dP=0, dH=0, dS=0;
+          if(baseline!==null){
+            dP = p - baseline.pitch;
+            dH = hd - baseline.headDrop;
+            dS = sr - baseline.sizeRatio;
+            st = "pitch원본:" + p.toFixed(1)
+               + "  숙임Δ:" + dP.toFixed(1)
+               + "  머리높이Δ:" + (dH*100).toFixed(1)
+               + "  얼굴크기Δ:" + (dS*100).toFixed(1);
+          }
+          // 관측용: 원본 변화량을 막대에 그대로 표시 (부호 보이게 abs 전 값을 스케일)
+          const dropScore = dP > 2 ? dP - 2 : 0;
+          send({detected:true, score:0, status:st,
+                cAngle:dropScore, cZ:Math.abs(dS*100), cHeight:Math.abs(dH*100)});
+        } else {
+          send({detected:false, status:"어깨·얼굴 인식 대기 중… 상반신이 보이게 앉아주세요"});
         }
       }
       requestAnimationFrame(loop);
