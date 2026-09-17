@@ -167,20 +167,31 @@ struct DetectorWebView: NSViewRepresentable {
           curPitch = p; curHeadDrop = hd; curSizeRatio = sr;
 
           let st = "기준 미설정 — ‘기준 잡기’를 누르세요";
-          let dP=0, dH=0, dS=0;
+          let sc = 0, cP = 0, cH = 0, cS = 0;
           if(baseline!==null){
-            dP = p - baseline.pitch;
-            dH = hd - baseline.headDrop;
-            dS = sr - baseline.sizeRatio;
-            st = "pitch원본:" + p.toFixed(1)
-               + "  숙임Δ:" + dP.toFixed(1)
-               + "  머리높이Δ:" + (dH*100).toFixed(1)
-               + "  얼굴크기Δ:" + (dS*100).toFixed(1);
+            const dP = p - baseline.pitch;      // 숙임(양수=숙임)
+            const dH = hd - baseline.headDrop;  // 머리높이 변화
+            const dS = sr - baseline.sizeRatio; // 얼굴크기 변화
+
+            // 주 신호: pitch 숙임 (데드존 2도)
+            cP = dP > 2 ? (dP - 2) : 0;
+
+            // 게이트: pitch가 3도 이상 숙여졌을 때만 보조신호 인정
+            const gate = dP > 3 ? Math.min(1, (dP - 3) / 5) : 0;
+            cH = Math.max(0, dH * 100) * gate;   // 머리높이 보조
+            cS = Math.max(0, dS * 200) * gate;   // 얼굴크기 보조
+
+            // 합산 (주 신호에 가중, 보조는 게이트로 걸러진 값)
+            const total = cP * 1.0 + cH * 0.5 + cS * 0.5;
+            sc = total;
+
+            let level = total < 3 ? "정자세"
+                      : total < 10 ? "경증 거북목"
+                      : total < 18 ? "중등도 거북목" : "중증 거북목";
+            st = level + "  (숙임:" + cP.toFixed(1)
+               + " 보조:" + (cH*0.5 + cS*0.5).toFixed(1) + ")";
           }
-          // 관측용: 원본 변화량을 막대에 그대로 표시 (부호 보이게 abs 전 값을 스케일)
-          const dropScore = dP > 2 ? dP - 2 : 0;
-          send({detected:true, score:0, status:st,
-                cAngle:dropScore, cZ:Math.abs(dS*100), cHeight:Math.abs(dH*100)});
+          send({detected:true, score:sc, status:st, cAngle:cP, cZ:cS, cHeight:cH});
         } else {
           send({detected:false, status:"어깨·얼굴 인식 대기 중… 상반신이 보이게 앉아주세요"});
         }
