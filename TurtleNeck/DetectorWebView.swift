@@ -194,11 +194,7 @@ struct DetectorWebView: NSViewRepresentable {
             const total = cP * 1.0 + cH * 0.5 + cS * 0.5;
             sc = total;
 
-            let level = total < 3 ? "정자세"
-                      : total < 10 ? "경증 거북목"
-                      : total < 18 ? "중등도 거북목" : "중증 거북목";
-            st = level + "  (숙임:" + cP.toFixed(1)
-               + " 보조:" + (cH*0.5 + cS*0.5).toFixed(1) + ")";
+            st = "숙임:" + cP.toFixed(1) + " 보조:" + (cH*0.5 + cS*0.5).toFixed(1);
           }
           send({detected:true, score:sc, status:st, cAngle:cP, cZ:cS, cHeight:cH});
         } else {
