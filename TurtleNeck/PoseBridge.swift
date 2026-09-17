@@ -17,6 +17,7 @@ class PoseBridge: NSObject, ObservableObject, WKScriptMessageHandler {
     @Published var cZ: Double = 0
     @Published var cHeight: Double = 0
     @Published var overlayIntensity: Double = 0
+    @Published var calibrated: Bool = false
 
     var webView: WKWebView?
     private let overlay = OverlayController()
@@ -43,6 +44,7 @@ class PoseBridge: NSObject, ObservableObject, WKScriptMessageHandler {
             if let a = body["cAngle"] as? Double { self.cAngle = a }
             if let z = body["cZ"] as? Double { self.cZ = z }
             if let h = body["cHeight"] as? Double { self.cHeight = h }
+            if let cal = body["calibrated"] as? Bool { self.calibrated = cal }
         }
     }
 

@@ -64,8 +64,8 @@ struct DetectorWebView: NSViewRepresentable {
 
     window.calibrate = () => {
       if(curPitch!==null){ baseline={pitch:curPitch, headDrop:curHeadDrop, sizeRatio:curSizeRatio};
-        send({status:"기준 저장 완료 — 자세를 바꿔가며 원본값 변화를 관찰하세요"}); }
-      else { send({status:"먼저 어깨·얼굴이 모두 잡혀야 합니다"}); }
+        send({calibrated:true, status:"기준 저장 완료 — 이제 자세를 바꿔보세요"}); }
+      else { send({status:"먼저 얼굴·어깨가 잡혀야 합니다"}); }
     };
 
     function pitchFromMatrix(m){
