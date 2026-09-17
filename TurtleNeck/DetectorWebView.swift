@@ -13,14 +13,23 @@ struct DetectorWebView: NSViewRepresentable {
         config.userContentController.add(bridge, name: "pose")
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
+        webView.uiDelegate = context.coordinator
+        webView.perform(Selector(("_setWindowOcclusionDetectionEnabled:")), with: false)
         bridge.webView = webView
         webView.loadHTMLString(Self.html, baseURL: URL(string: "https://localhost"))
         return webView
     }
     func updateNSView(_ nsView: WKWebView, context: Context) {}
     func makeCoordinator() -> Coordinator { Coordinator() }
-    class Coordinator: NSObject, WKNavigationDelegate {}
-
+    class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+        func webView(_ webView: WKWebView,
+                     requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+                     initiatedByFrame frame: WKFrameInfo,
+                     type: WKMediaCaptureType,
+                     decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+            decisionHandler(.grant)
+        }
+    }
     static let html = """
     <!DOCTYPE html>
     <html><head><meta charset="utf-8"><style>
