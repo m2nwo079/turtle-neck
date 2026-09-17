@@ -35,7 +35,7 @@ struct DetectorWebView: NSViewRepresentable {
     function send(o){ window.webkit.messageHandlers.pose.postMessage(o); }
     let landmarker, baseline = null;
     let emaAngle = null, emaZ = null, emaHeight = null;
-    const W_ANGLE = 1.4, W_Z = 100.0, W_HEIGHT = 60.0, DEADZONE = 4;
+        const W_ANGLE = 2.0, W_Z = 100.0, W_HEIGHT = 60.0, DEADZONE = 4;
     function angle(a,b,c){
       const v1={x:a.x-b.x,y:a.y-b.y}, v2={x:c.x-b.x,y:c.y-b.y};
       const dot=v1.x*v2.x+v1.y*v2.y, m1=Math.hypot(v1.x,v1.y), m2=Math.hypot(v2.x,v2.y);
@@ -74,7 +74,7 @@ struct DetectorWebView: NSViewRepresentable {
           const rawAngle = angle(nose, ear, shoulder);
           const rawZ = shoulder.z - ear.z;
           const rawHeight = shoulder.y - ear.y;
-          const Az = 0.4, Aa = 0.22, Ah = 0.3;
+          const Az = 0.4, Aa = 0.3, Ah = 0.3;
           emaAngle  = emaAngle===null ? rawAngle : Aa*rawAngle+(1-Aa)*emaAngle;
           emaZ      = emaZ===null ? rawZ : Az*rawZ+(1-Az)*emaZ;
           emaHeight = emaHeight===null ? rawHeight : Ah*rawHeight+(1-Ah)*emaHeight;
@@ -83,7 +83,7 @@ struct DetectorWebView: NSViewRepresentable {
             cA  = Math.max(0, baseline.angle - emaAngle) * W_ANGLE;
             const Z_DEAD = 0.004;
             const zDiff = Math.max(0, (emaZ - baseline.z) - Z_DEAD);
-            cZv = Math.sqrt(zDiff) * W_Z * 0.65;
+            cZv = Math.sqrt(zDiff) * W_Z * 0.85;
             cH  = Math.max(0, baseline.height - emaHeight) * W_HEIGHT;
             const total = cA+cZv+cH;
             sc = total < DEADZONE ? 0 : total - DEADZONE;
