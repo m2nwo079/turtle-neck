@@ -90,7 +90,13 @@ class VisionDetector: NSObject, ObservableObject, AVCaptureVideoDataOutputSample
         output.setSampleBufferDelegate(self, queue: queue)
         if session.canAddOutput(output) { session.addOutput(output) }
         session.commitConfiguration()
-        queue.async { self.session.startRunning() }
+        queue.async {
+            self.session.startRunning()
+            try? device.lockForConfiguration()
+            device.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 15)
+            device.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: 15)
+            device.unlockForConfiguration()
+        }
         DispatchQueue.main.async { self.status = "감지 중… 바르게 앉아 ‘기준 잡기’를 누르세요" }
     }
 
@@ -103,7 +109,7 @@ class VisionDetector: NSObject, ObservableObject, AVCaptureVideoDataOutputSample
                        didOutput sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
         frameCount += 1
-        guard frameCount % 3 == 0 else { return }
+        guard frameCount % 2 == 0 else { return }
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let req = VNDetectFaceRectanglesRequest { [weak self] r, _ in
             guard let self = self,
