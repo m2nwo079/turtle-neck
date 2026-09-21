@@ -2,8 +2,6 @@
 //  VisionDetector.swift
 //  TurtleNeck
 //
-//  Created by 이민우 on 9/17/26.
-//
 
 import SwiftUI
 import AVFoundation
@@ -18,15 +16,10 @@ class VisionDetector: NSObject, ObservableObject, AVCaptureVideoDataOutputSample
     @Published var calibrated = false
     @Published var cPitch: Double = 0
     @Published var cSize: Double = 0
-    @Published var overlayIntensity: Double = 0
 
     let session = AVCaptureSession()
     private let queue = DispatchQueue(label: "cam")
     private var frameCount = 0
-    private let overlay = OverlayController()
-    private var sustain: Double = 0
-    private var badStreak = 0
-    private var overlayTimer: Timer?
 
     private var curPitch: Double? = nil
     private var curSize: Double? = nil
@@ -42,28 +35,10 @@ class VisionDetector: NSObject, ObservableObject, AVCaptureVideoDataOutputSample
     private let PITCH_DEAD = 1.5
 
     func start() {
-        overlay.show()
-        overlayTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            self?.tick()
-        }
         AVCaptureDevice.requestAccess(for: .video) { granted in
             if granted { self.configure() }
             else { DispatchQueue.main.async { self.status = "카메라 권한 거부됨" } }
         }
-    }
-
-    private func tick() {
-        let bad = calibrated && score >= 3
-        if bad { badStreak = min(badStreak + 1, 10) } else { badStreak = 0 }
-        if badStreak >= 2 {
-            sustain = min(1.0, sustain + 0.14)
-        } else {
-            sustain = max(0.0, sustain - 0.12)
-        }
-        let severity = min(1.0, score / 20.0)
-        let intensity = severity * sustain
-        overlayIntensity = intensity
-        overlay.update(intensity: intensity)
     }
 
     func calibrate() {
