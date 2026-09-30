@@ -3,6 +3,29 @@
 macOS SwiftUI 앱. 웹캠으로 거북목(고개 숙임/전방 머리 자세)을 감지하고 경고한다.
 개인 프로젝트, 테스트·README 없음. 빌드는 Xcode(`TurtleNeck.xcodeproj`, 스킴 `TurtleNeck`).
 
+## 제품 방향 (확정: Electron + React 크로스플랫폼)
+- 실제 제품은 **Electron + React로 macOS/Windows 동시 지원**. 감지는 MediaPipe JS(Electron 내부)로 이식 예정
+- 이 Swift 레포는 감지 전략 검증용 프로토타입. 이식 대상: pitch 주신호 + 얼굴크기 게이트 + 5샘플 평균 + 개인 기준값(수치는 재튜닝 필요)
+
+### 챌린지 1: 데스크톱 전체 오버레이 (OpenPets `apps/desktop/src/pet-window.ts`, `main.ts`, `docs/desktop.md` 참고)
+- macOS: `setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })` + `setAlwaysOnTop(true, 'floating')` + `app.dock.hide()`
+- Windows: 전체화면 앱 진입 시 셸이 TOPMOST를 조용히 제거 → 1초 주기로 `setAlwaysOnTop(false)` 후 재설정(Electron 캐시 우회)
+- Windows: `disable-features=CalculateNativeWinOcclusion`으로 전체화면 중 투명 창 페인트 중단 방지
+- 클릭 통과: `setIgnoreMouseEvents(true, { forward: true })`. 위 Windows 동작은 OpenPets 측 실측 기록이며 우리 환경 미검증
+
+### 챌린지 2: OS 카메라 사용 (OpenPets는 카메라 미사용 → 직접 검증 필요)
+- macOS: `NSCameraUsageDescription`(electron-builder `mac.extendInfo`) 필수. Hardened Runtime 사용 시 `com.apple.security.device.camera` entitlement 없으면 팝업 없이 거부
+- macOS: ad-hoc 서명은 빌드마다 cdhash가 바뀌어 **업데이트할 때마다 카메라 권한 재요청**
+- Windows: 앱별 권한 팝업 없음, 전역 "데스크톱 앱 카메라 허용" 토글만 존재. Zoom 등과 동시 사용 시 `NotReadableError` 가능성(미검증)
+- 창 숨김·가림 시 rAF 스로틀 → `backgroundThrottling: false` 또는 항상 보이는 펫 창에서 감지(미검증)
+- MediaPipe wasm·모델은 CDN이 아닌 앱에 번들 (`FilesetResolver.forVisionTasks(<local path>)`)
+
+### 배포·서명·공증 (OpenPets `apps/desktop/electron-builder.yml`, `docs/release.md`, `docs/install.mdx` 참고)
+- macOS: Developer ID·공증 없이 ad-hoc 서명(`identity: "-"`, `hardenedRuntime: false`). 완전 무서명은 Apple Silicon에서 "손상됨" 오류 → ad-hoc은 필수
+- macOS 설치 안내: `xattr -dr com.apple.quarantine /Applications/<App>.app`
+- Windows: GitHub Actions + SignPath(오픈소스 무료 서명)로 앱 exe와 NSIS 설치파일을 각각 서명. 우리 적용 가능 여부(레포 공개 등 조건) 미확인
+- OpenPets와 달리 우리는 카메라를 쓰므로 ad-hoc이면 업데이트 배포마다 권한 재요청 → Apple Developer ID 도입 여부 결정 필요
+
 ## 프로젝트 설정 (모든 브랜치 동일한 pbxproj)
 - macOS 15.7, Swift 5, `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, Approachable Concurrency 켜짐
 - App Sandbox 켜짐: 카메라 허용, outgoing network 허용(webview 버전 CDN 용), 오디오 등 나머지 차단
